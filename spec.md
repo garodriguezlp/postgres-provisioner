@@ -15,8 +15,8 @@ Flyway.
 - **Build Tool**: JBang (single-file executable scripts with inline dependencies)
 - **Language**: Java 17 (leverage modern features like records, text blocks, switch expressions)
 - **CLI Framework**: Picocli
-    - Use `@Mixin` for reusable parameter groups between commands
-    - Enable mixin help visibility
+    - Use `@Mixin` for reusable parameter groups between commands, if applicable
+    - Enable built-in picocli's mixinStandardHelpOptions
 - **Migration Tool**: Flyway Core
 - **HTTP Client**: OkHttp (for downloading migration artifacts from URLs)
 - **Logging Framework**: Tinylog 2.x (https://tinylog.org/)
@@ -97,11 +97,9 @@ things simple with basic IP, user, and password authentication.
 #### 2. PostgreSQL Configuration
 
 - Modify `postgresql.conf` to enable remote connections:
-    - Set `listen_addresses = '*'` (or specific IP)
-    - Adjust `max_connections` if needed
-- Update `pg_hba.conf` with appropriate access rules:
-    - Add host-based authentication entries
-    - Configure authentication method (md5, scram-sha-256)
+    - Set `listen_addresses = '*'` 
+    - set `max_connections = 300`
+    - set `shared_buffers = 256MB`
 - Backup original configuration files before modification
 - Validate syntax of modified configuration files
 
@@ -113,6 +111,8 @@ things simple with basic IP, user, and password authentication.
 - Wait for PostgreSQL to be ready to accept connections
 
 ### Command-Line Interface
+
+Ideally we'll prefer leveraging defaults values places at option definitions or values configured via picocli's PropertiesDefaultProvider.
 
 ```bash
 jbang PostgresSshConfigurator.java \
@@ -265,6 +265,8 @@ database structure.
 
 ### Command-Line Interface
 
+Same as above, the expectation is to leverage defaults values places at option definitions or values configured via picocli's PropertiesDefaultProvider.
+
 ```bash
 jbang FlywayProvisioner.java \
   --artifactory-base-url <base-url> \
@@ -299,8 +301,8 @@ jbang FlywayProvisioner.java \
 ### Execution Flow
 
 1. **Parse Input**
-    - Process command-line arguments
-    - Validate required parameters
+    - Process command-line arguments, picocli role
+    - Validate required parameters, leverage as much as possible picocli features for this
     - Parse schema:version mappings
 
 2. **Initialize Environment**
@@ -619,6 +621,49 @@ setDefaultValueProvider(new PropertiesDefaultProvider())
 execute(args);
 ```
 
+#### Loading application.properties in JBang Scripts
+
+**Important**: Properties files must be explicitly bundled and loaded from classpath using JBang's `//FILES` directive. By default, `PropertiesDefaultProvider` searches the user's home directory, which won't work for single-file scripts.
+
+**Implementation Steps**:
+
+1. Add properties file to JBang resources:
+```java
+//FILES application.properties=application.properties
+```
+
+2. Load from classpath in your main method:
+```java
+public static void main(String[] args) {
+    var propertiesUrl = FlywayProvisioner.class.getClassLoader()
+            .getResource("application.properties");
+    
+    int exitCode = new CommandLine(new FlywayProvisioner())
+            .setDefaultValueProvider(new PropertiesDefaultProvider(propertiesUrl))
+            .execute(args);
+    System.exit(exitCode);
+}
+```
+
+3. Place `application.properties` in the same directory as your `.java` script file.
+
+#### Parameters with Descriptions
+
+Parameters should include descriptions (shown in `--help`):
+
+```java
+@Option(names = "--db-url",
+        required = true,
+        description = "JDBC connection URL for PostgreSQL database")
+private String dbUrl;
+```
+
+#### Example: Multiple Options Mixin
+
+```java
+// ...existing code...
+```
+
 ---
 
 ## Error Handling
@@ -835,7 +880,7 @@ work.dir.description=Temporary directory for downloads and extraction
 cleanup=true
 cleanup.description=Remove temporary files after execution
 fail.fast=false
-fail.fast.description=Stop execution on first failure (false = continue with remaining schemas)
+fail.fast.description=Stop execution on first failure (default: false, continues with remaining schemas)
 # SSH Configurator settings
 ssh.port=22
 ssh.port.description=SSH port number
@@ -871,7 +916,7 @@ artifactory.password=${ARTIFACTORY_TOKEN}
 ### Picocli Integration
 
 ```java
-// Enable default value provider
+// Enable default value provider - Use annotation based
 public static void main(String[] args) {
     int exitCode = new CommandLine(new FlywayProvisioner())
             .setDefaultValueProvider(new PropertiesDefaultProvider())
@@ -884,6 +929,49 @@ public static void main(String[] args) {
         required = true,
         description = "JDBC connection URL for PostgreSQL database")
 private String dbUrl;
+```
+
+#### Loading application.properties in JBang Scripts
+
+**Important**: Properties files must be explicitly bundled and loaded from classpath using JBang's `//FILES` directive. By default, `PropertiesDefaultProvider` searches the user's home directory, which won't work for single-file scripts.
+
+**Implementation Steps**:
+
+1. Add properties file to JBang resources:
+```java
+//FILES application.properties=application.properties
+```
+
+2. Load from classpath in your main method:
+```java
+public static void main(String[] args) {
+    var propertiesUrl = FlywayProvisioner.class.getClassLoader()
+            .getResource("application.properties");
+    
+    int exitCode = new CommandLine(new FlywayProvisioner())
+            .setDefaultValueProvider(new PropertiesDefaultProvider(propertiesUrl))
+            .execute(args);
+    System.exit(exitCode);
+}
+```
+
+3. Place `application.properties` in the same directory as your `.java` script file.
+
+#### Parameters with Descriptions
+
+Parameters should include descriptions (shown in `--help`):
+
+```java
+@Option(names = "--db-url",
+        required = true,
+        description = "JDBC connection URL for PostgreSQL database")
+private String dbUrl;
+```
+
+#### Example: Multiple Options Mixin
+
+```java
+// ...existing code...
 ```
 
 ---
@@ -1419,7 +1507,7 @@ Complete project layout:
 postgres-provisioner/
 ├── PostgresSshConfigurator.java # Script 1
 ├── FlywayProvisioner.java # Script 2
-├── application.properties # Default configuration
+├── application.properties # Default configuration - for this to be loaded, we need a custom loader from classpath (use Jbang //files directive) and PropertiesDefaultProvider(file) and then set tha in the picocli spec at the very beginning of main method, otherwise it'll try to find the file on the user's home dir
 ├── README.md # Main documentation
 │
 ├── baseline-scripts/ # Static baseline SQL
@@ -1630,4 +1718,4 @@ on preference (spec allows either).
 - ✅ **Error Messages**: Actionable error messages with context
 - ✅ **Exit Codes**: Proper exit codes (0 = success, non-zero = failure)
 - ✅ **Execution Time**: Reports execution duration
-- ✅ **Visual Feedback**: Clear progress indicators and status symbols 
+- ✅ **Visual Feedback**: Clear progress indicators and status symbols
