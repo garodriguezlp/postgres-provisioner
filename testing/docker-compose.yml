@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 15 with SSH access
+  postgres-ssh:
+    image: postgres-provisioner-test:latest
+    build:
+      context: ./postgres-ssh
+      dockerfile: Dockerfile
+    ports:
+      - "5432:5432"
+      - "2222:22"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: testpass
+      POSTGRES_DB: testdb
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Mock Artifactory (HTTP server with ZIP files)
+  mock-artifactory:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ../test-artifacts:/usr/share/nginx/html/migrations:ro
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres-data:
