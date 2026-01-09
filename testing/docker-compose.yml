@@ -24,11 +24,12 @@ services:
 
   # Mock Artifactory (HTTP server with ZIP files)
   mock-artifactory:
-    image: nginx:alpine
+    image: mock-artifactory:latest
+    build:
+      context: ./mock-artifactory
+      dockerfile: Dockerfile
     ports:
       - "8080:80"
-    volumes:
-      - ./test-artifacts:/usr/share/nginx/html/migrations:ro
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
       interval: 5s

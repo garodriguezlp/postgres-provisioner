@@ -10,19 +10,18 @@ testing/
 ├── postgres-ssh/                   # Custom PostgreSQL + SSH Docker image
 │   ├── Dockerfile
 │   └── docker-entrypoint.sh
-├── test-artifacts/                 # Migration artifacts (ZIPs)
+├── mock-artifactory/               # Mock Artifactory server
+│   └── Dockerfile                  # Nginx + builds migration ZIPs
+├── test-artifacts/                 # Migration sources
 │   ├── customer-migrations/        # Source SQL files
 │   ├── orders-migrations/
-│   ├── inventory-migrations/
-│   ├── customer/                   # Generated ZIPs
-│   ├── orders/
-│   └── inventory/
+│   └── inventory-migrations/
 ├── up.sh                          # Start environment
 ├── down.sh                        # Stop environment
 ├── reset.sh                       # Reset (remove all data)
 ├── logs.sh                        # View logs
 ├── status.sh                      # Check environment status
-├── prepare-artifacts.sh           # Generate test ZIPs
+├── prepare-artifacts.sh           # Rebuild mock-artifactory with fresh artifacts
 └── README.md                      # This file
 ```
 
@@ -32,40 +31,30 @@ testing/
 
 - Docker and Docker Compose installed
 - Git Bash (MinGW) on Windows, or Bash on Linux/macOS
-- `zip` utility (usually pre-installed on Git Bash)
 - `psql` client (optional, for testing database connections)
 
 ## Quick Start
 
-### 1. Generate Test Artifacts
-
-First, generate the migration ZIP files:
-
-```bash
-./prepare-artifacts.sh
-```
-
-This creates ZIP files for customer, orders, and inventory schemas with sample Flyway migrations.
-
-### 2. Start the Environment
+### 1. Start the Environment
 
 ```bash
 ./up.sh
 ```
 
 This will:
-- Build the custom PostgreSQL + SSH Docker image
+- Build the PostgreSQL + SSH Docker image
+- Build the Mock Artifactory Docker image (with migration ZIPs)
 - Start PostgreSQL (port 5432) and SSH (port 2222)
-- Start Mock Artifactory (Nginx on port 8080)
+- Start Mock Artifactory (Nginx on port 8080) serving the built-in artifacts
 - Wait for services to be healthy
 
-### 3. Check Status
+### 2. Check Status
 
 ```bash
 ./status.sh
 ```
 
-### 4. View Logs
+### 3. View Logs
 
 ```bash
 # Follow logs for all services
@@ -78,7 +67,7 @@ This will:
 ./logs.sh postgres-ssh
 ```
 
-### 5. Stop the Environment
+### 4. Stop the Environment
 
 ```bash
 ./down.sh
@@ -86,7 +75,7 @@ This will:
 
 Data is preserved in Docker volumes. Use `./reset.sh` to remove all data.
 
-### 6. Reset (Clean Slate)
+### 5. Reset (Clean Slate)
 
 ```bash
 ./reset.sh
@@ -181,8 +170,18 @@ Wait a bit longer - it can take 10-15 seconds to initialize:
 ```
 
 ### Mock Artifactory returns 404
+mock-artifactory Docker image. Try rebuilding:
+```bash
+./prepare-artifacts.sh
+```
 
-Make sure you ran `./prepare-artifacts.sh` first to generate the ZIP files.
+Or manually:
+```bash
+./down.sh
+docker-compose build --no-cache mock-artifactory
+docker-compose build --no-cache
+./up.sh
+```
 
 ### Permission denied on scripts
 
@@ -207,9 +206,13 @@ netstat -an | grep 2222
 netstat -an | grep 8080
 ```
 
-## Customization
 
-### Change PostgreSQL Version
+### Change Nginx Version
+
+Edit [docker-compose.yml](docker-compose.yml) and [mock-artifactory/Dockerfile](mock-artifactory/Dockerfile) to use a different Nginx version.
+## Customization
+mock-artifactory/Dockerfile` to copy and zip the new schema
+4. Rebuild the image with `./prepare-artifacts.sh
 
 Edit [docker-compose.yml](docker-compose.yml) and [postgres-ssh/Dockerfile](postgres-ssh/Dockerfile) to use a different PostgreSQL version.
 
@@ -217,8 +220,8 @@ Edit [docker-compose.yml](docker-compose.yml) and [postgres-ssh/Dockerfile](post
 
 1. Create a new directory in `test-artifacts/` (e.g., `shipping-migrations/`)
 2. Add Flyway migration files (V1__*.sql, V2__*.sql, etc.)
-3. Update `prepare-artifacts.sh` to include the new schema
-4. Run `./prepare-artifacts.sh`
+3. Update `postgres-ssh/Dockerfile` to copy and zip the new schema
+4. Rebuild the image with `docker-compose build`
 
 ## Clean Up
 

@@ -994,9 +994,9 @@ version: '3.8'
 services:
   # PostgreSQL 15 with SSH access
   postgres-ssh:
-    image: custom-postgres-ssh:latest
+    image: postgres-provisioner-test:latest
     build:
-      context: ./docker/postgres-ssh
+      context: ./postgres-ssh
       dockerfile: Dockerfile
     ports:
       - "5432:5432"
@@ -1015,11 +1015,12 @@ services:
 
   # Mock Artifactory (HTTP server with ZIP files)
   mock-artifactory:
-    image: nginx:alpine
+    image: mock-artifactory:latest
+    build:
+      context: ./mock-artifactory
+      dockerfile: Dockerfile
     ports:
       - "8080:80"
-    volumes:
-      - ./test-artifacts:/usr/share/nginx/html/migrations:ro
     healthcheck:
       test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/" ]
       interval: 5s
@@ -1032,15 +1033,15 @@ volumes:
 
 #### Custom PostgreSQL + SSH Image
 
-**Dockerfile** (`./docker/postgres-ssh/Dockerfile`):
+**Dockerfile** (`./postgres-ssh/Dockerfile`):
 
 ```dockerfile
 FROM postgres:15
 
-# Install SSH server
+# Install SSH server and other utilities
 RUN apt-get update && \
     apt-get install -y openssh-server sudo && \
-    mkdir /var/run/sshd && \
+    mkdir -p /var/run/sshd && \
     rm -rf /var/lib/apt/lists/*
 
 # Create SSH user with sudo privileges
@@ -1051,56 +1052,83 @@ RUN useradd -m -s /bin/bash testuser && \
 
 # Configure SSH
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
-    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config
 
 # Expose SSH port
 EXPOSE 22
 
-# Start script to run both PostgreSQL and SSH
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Copy custom entrypoint
+COPY docker-entrypoint.sh /usr/local/bin/custom-entrypoint.sh
+RUN chmod +x /usr/local/bin/custom-entrypoint.sh
 
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/custom-entrypoint.sh"]
 CMD ["postgres"]
 ```
 
-**Entry Point Script** (`./docker/postgres-ssh/docker-entrypoint.sh`):
+**Entry Point Script** (`./postgres-ssh/docker-entrypoint.sh`):
 
 ```bash
 #!/bin/bash
 set -e
 
-# Start SSH daemon
-/usr/sbin/sshd
+# Start SSH daemon in background
+/usr/sbin/sshd -D &
 
 # Execute original postgres entrypoint
 exec docker-entrypoint.sh "$@"
 ```
 
+#### Mock Artifactory Image
+
+**Dockerfile** (`./mock-artifactory/Dockerfile`):
+
+```dockerfile
+FROM nginx:alpine
+
+# Install zip utility
+RUN apk add --no-cache zip
+
+# Copy migration source files
+COPY ../test-artifacts/customer-migrations /tmp/customer-migrations
+COPY ../test-artifacts/orders-migrations /tmp/orders-migrations
+COPY ../test-artifacts/inventory-migrations /tmp/inventory-migrations
+
+# Create artifact directory structure and generate ZIPs
+RUN mkdir -p /usr/share/nginx/html/migrations/customer \
+             /usr/share/nginx/html/migrations/orders \
+             /usr/share/nginx/html/migrations/inventory && \
+    cd /tmp/customer-migrations && zip -q -r /usr/share/nginx/html/migrations/customer/customer-1.5.0.zip *.sql && \
+    cd /tmp/orders-migrations && zip -q -r /usr/share/nginx/html/migrations/orders/orders-2.3.1.zip *.sql && \
+    cd /tmp/inventory-migrations && zip -q -r /usr/share/nginx/html/migrations/inventory/inventory-1.0.0.zip *.sql && \
+    rm -rf /tmp/*-migrations
+
+# Nginx will serve files from /usr/share/nginx/html/migrations
+```
+
 #### Test Artifacts Structure
 
-Create mock migration artifacts in `./test-artifacts/`:
+Create migration source files in `./test-artifacts/`:
 
 ```
 test-artifacts/
-├── customer/
-│   └── customer-1.5.0.zip
-├── orders/
-│   └── orders-2.3.1.zip
-└── inventory/
-    └── inventory-1.0.0.zip
+├── customer-migrations/
+│   ├── V1__initial_schema.sql
+│   ├── V1.1__add_address_fields.sql
+│   └── V1.2__add_preferences.sql
+├── orders-migrations/
+│   ├── V1__initial_schema.sql
+│   ├── V1.1__add_order_items.sql
+│   └── V2__add_shipping_info.sql
+└── inventory-migrations/
+    ├── V1__initial_schema.sql
+    └── V1.1__add_inventory_tracking.sql
 ```
 
-Each ZIP file should contain Flyway migration files:
-
-```
-customer-1.5.0.zip:
-  └── V1__initial_schema.sql
-  └── V1.1__add_customers_table.sql
-  └── V1.2__add_indexes.sql
-  └── V2__add_address_fields.sql
-  └── ...
-```
+The mock-artifactory Docker image will automatically build ZIPs from these sources:
+- `customer-1.5.0.zip` from customer-migrations/
+- `orders-2.3.1.zip` from orders-migrations/
+- `inventory-1.0.0.zip` from inventory-migrations/
 
 ### Test Scenarios
 
