@@ -26,8 +26,8 @@ services:
   mock-artifactory:
     image: mock-artifactory:latest
     build:
-      context: ..
-      dockerfile: ./docker/mock-artifactory/Dockerfile
+      context: ./mock-artifactory
+      dockerfile: ./Dockerfile
     ports:
       - "8080:80"
     healthcheck:
