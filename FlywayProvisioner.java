@@ -144,12 +144,12 @@ public class FlywayProvisioner implements Callable<Integer> {
         // Load properties file from classpath
         var propertiesUrl = FlywayProvisioner.class.getClassLoader()
             .getResource("application.properties");
-        
+
         var cmd = new CommandLine(new FlywayProvisioner());
         if (propertiesUrl != null) {
             cmd.setDefaultValueProvider(new PropertiesDefaultProvider(new File(propertiesUrl.getFile())));
         }
-        
+
         int exitCode = cmd.execute(args);
         System.exit(exitCode);
     }
@@ -157,134 +157,134 @@ public class FlywayProvisioner implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
         Instant startTime = Instant.now();
-        
+
         printHeader();
-        
+
         try {
             List<SchemaMapping> schemaMappings = initializeAndValidate();
             ArtifactDownloader downloader = new ArtifactDownloader(artifactoryBaseUrl, workDirectory);
-            
+
             downloadAndExtractArtifacts(schemaMappings, downloader);
-            
+
             DatabaseManager dbManager = new DatabaseManager(dbUrl, dbUser, dbPassword, baselineLocation);
             executeBaselineOnce(dbManager, schemaMappings);
             executeMigrations(schemaMappings, dbManager);
-            
+
             long totalDurationSeconds = Duration.between(startTime, Instant.now()).getSeconds();
             generateSummaryReport(totalDurationSeconds);
-            
+
             cleanupIfRequested();
-            
+
             return determineExitCode();
-            
+
         } catch (Exception e) {
             Logger.error(e, "✗ Provisioning failed: {}", e.getMessage());
             return 1;
         }
     }
-    
+
     private void printHeader() {
         Logger.info("=".repeat(60));
         Logger.info("Flyway Migration Orchestrator");
         Logger.info("=".repeat(60));
     }
-    
+
     private List<SchemaMapping> initializeAndValidate() throws IOException {
         Logger.info("→ Parsing schema configurations...");
         List<SchemaMapping> schemaMappings = parseSchemas(schemas);
         Logger.info("✓ Found {} schema(s) to process", schemaMappings.size());
-        
+
         Logger.info("→ Initializing work directory...");
         initializeWorkDirectory();
         Logger.info("✓ Work directory: {}", workDirectory);
-        
+
         Logger.info("→ Validating baseline scripts...");
         validateBaselineLocation();
         Logger.info("✓ Baseline location validated: {}", baselineLocation);
-        
+
         return schemaMappings;
     }
-    
+
     private void downloadAndExtractArtifacts(List<SchemaMapping> schemaMappings, ArtifactDownloader downloader) {
         Logger.info("→ Downloading migration artifacts...");
-        
+
         for (int i = 0; i < schemaMappings.size(); i++) {
             SchemaMapping mapping = schemaMappings.get(i);
-            Logger.info("  [{}/{}] Downloading schema '{}' v{}...", 
+            Logger.info("  [{}/{}] Downloading schema '{}' v{}...",
                 i + 1, schemaMappings.size(), mapping.schemaName, mapping.version);
-            
+
             try {
                 Path artifactPath = downloader.download(mapping);
-                Logger.info("  ✓ Downloaded {} ({} MB)", 
-                    artifactPath.getFileName(), 
+                Logger.info("  ✓ Downloaded {} ({} MB)",
+                    artifactPath.getFileName(),
                     String.format("%.2f", Files.size(artifactPath) / 1024.0 / 1024.0));
-                
+
                 Logger.debug("  Extracting artifact...");
                 Path extractedPath = downloader.extract(artifactPath, mapping);
                 Logger.info("  ✓ Extracted to {}", extractedPath);
-                
+
                 mapping.migrationsPath = extractedPath;
-                
+
             } catch (Exception e) {
-                Logger.error("  ✗ Failed to download/extract schema '{}': {}", 
+                Logger.error("  ✗ Failed to download/extract schema '{}': {}",
                     mapping.schemaName, e.getMessage());
-                
+
                 if (failFast) {
                     throw new RuntimeException(e);
                 }
-                
+
                 results.add(new MigrationResult(mapping, false, 0, 0, e.getMessage()));
                 Logger.warn("  Skipping schema '{}', continuing with remaining schemas", mapping.schemaName);
             }
         }
     }
-    
+
     private void executeBaselineOnce(DatabaseManager dbManager, List<SchemaMapping> schemaMappings) throws SQLException, IOException {
         Logger.info("→ Executing baseline scripts...");
-        
+
         dbManager.executeBaselineOnce();
         Logger.info("✓ Baseline completed");
     }
-    
+
     private void executeMigrations(List<SchemaMapping> schemaMappings, DatabaseManager dbManager) {
         Logger.info("→ Executing database migrations...");
-        
+
         for (int i = 0; i < schemaMappings.size(); i++) {
             SchemaMapping mapping = schemaMappings.get(i);
-            
+
             if (mapping.migrationsPath == null) {
                 continue;
             }
-            
-            Logger.info("  [{}/{}] Processing schema '{}'...", 
+
+            Logger.info("  [{}/{}] Processing schema '{}'...",
                 i + 1, schemaMappings.size(), mapping.schemaName);
-            
+
             try {
                 Instant schemaStart = Instant.now();
-                
+
                 Logger.info("    Running Flyway migrations...");
                 int migrationsApplied = dbManager.migrate(mapping);
-                
+
                 long durationSeconds = Duration.between(schemaStart, Instant.now()).getSeconds();
                 Logger.info("    ✓ Applied {} migration(s) in {}s", migrationsApplied, durationSeconds);
-                
+
                 results.add(new MigrationResult(mapping, true, migrationsApplied, durationSeconds, null));
-                
+
             } catch (Exception e) {
-                Logger.error("    ✗ Migration failed for schema '{}': {}", 
+                Logger.error("    ✗ Migration failed for schema '{}': {}",
                     mapping.schemaName, e.getMessage());
                 Logger.debug(e, "Migration error details");
-                
+
                 if (failFast) {
                     throw new RuntimeException(e);
                 }
-                
+
                 results.add(new MigrationResult(mapping, false, 0, 0, e.getMessage()));
                 Logger.warn("    Skipping schema '{}', continuing with remaining schemas", mapping.schemaName);
             }
         }
     }
-    
+
     private void cleanupIfRequested() {
         if (cleanup) {
             Logger.info("→ Cleaning up temporary files...");
@@ -292,7 +292,7 @@ public class FlywayProvisioner implements Callable<Integer> {
             Logger.info("✓ Cleanup completed");
         }
     }
-    
+
     private int determineExitCode() {
         long failedCount = results.stream().filter(r -> !r.success).count();
         if (failedCount > 0) {
@@ -301,7 +301,7 @@ public class FlywayProvisioner implements Callable<Integer> {
             Logger.warn("=".repeat(60));
             return 1;
         }
-        
+
         Logger.info("=".repeat(60));
         Logger.info("✓ All migrations completed successfully!");
         Logger.info("=".repeat(60));
@@ -310,20 +310,20 @@ public class FlywayProvisioner implements Callable<Integer> {
 
     private List<SchemaMapping> parseSchemas(String schemasStr) {
         List<SchemaMapping> mappings = new ArrayList<>();
-        
+
         for (String pair : schemasStr.split(",")) {
             String[] parts = pair.trim().split(":");
             if (parts.length != 2) {
                 throw new IllegalArgumentException("Invalid schema:version format: " + pair);
             }
-            
+
             String schemaName = parts[0].trim();
             String version = parts[1].trim();
-            
+
             Logger.debug("Parsed schema mapping: {} -> {}", schemaName, version);
             mappings.add(new SchemaMapping(schemaName, version));
         }
-        
+
         return mappings;
     }
 
@@ -337,11 +337,11 @@ public class FlywayProvisioner implements Callable<Integer> {
                 .format(java.time.LocalDateTime.now());
             workDirectory = Paths.get(".").resolve("flyway-work-" + timestamp);
         }
-        
+
         if (!Files.exists(workDirectory)) {
             Files.createDirectories(workDirectory);
         }
-        
+
         Logger.debug("Work directory initialized: {}", workDirectory);
     }
 
@@ -350,7 +350,7 @@ public class FlywayProvisioner implements Callable<Integer> {
         if (!Files.exists(baselinePath) || !Files.isDirectory(baselinePath)) {
             throw new IllegalArgumentException("Baseline location does not exist or is not a directory: " + baselineLocation);
         }
-        
+
         Logger.debug("Baseline location validated: {}", baselinePath.toAbsolutePath());
     }
 
@@ -383,7 +383,7 @@ public class FlywayProvisioner implements Callable<Integer> {
         long successCount = results.stream().filter(r -> r.success).count();
         long failedCount = results.stream().filter(r -> !r.success).count();
         int totalMigrations = results.stream().mapToInt(r -> r.migrationsApplied).sum();
-        
+
         Logger.info("");
         Logger.info("=".repeat(60));
         Logger.info("  Flyway Migration Execution Summary");
@@ -395,7 +395,7 @@ public class FlywayProvisioner implements Callable<Integer> {
         Logger.info("Total Execution Time: {}s", totalDurationSeconds);
         Logger.info("");
         Logger.info("Details:");
-        
+
         for (MigrationResult result : results) {
             if (result.success) {
                 Logger.info("  ✓ {} (v{}) - {}s - {} migration(s) applied",
@@ -403,7 +403,7 @@ public class FlywayProvisioner implements Callable<Integer> {
                     result.mapping.version,
                     result.durationSeconds,
                     result.migrationsApplied);
-                
+
                 if (verbose && result.mapping.appliedMigrations != null) {
                     for (String migration : result.mapping.appliedMigrations) {
                         Logger.info("      - {}", migration);
@@ -416,7 +416,7 @@ public class FlywayProvisioner implements Callable<Integer> {
                     result.errorMessage);
             }
         }
-        
+
         Logger.info("=".repeat(60));
     }
 
@@ -445,7 +445,7 @@ public class FlywayProvisioner implements Callable<Integer> {
         final long durationSeconds;
         final String errorMessage;
 
-        MigrationResult(SchemaMapping mapping, boolean success, int migrationsApplied, 
+        MigrationResult(SchemaMapping mapping, boolean success, int migrationsApplied,
                        long durationSeconds, String errorMessage) {
             this.mapping = mapping;
             this.success = success;
@@ -466,7 +466,7 @@ public class FlywayProvisioner implements Callable<Integer> {
         ArtifactDownloader(String baseUrl, Path workDirectory) {
             this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
             this.workDirectory = workDirectory;
-            
+
             this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
@@ -478,38 +478,38 @@ public class FlywayProvisioner implements Callable<Integer> {
             // Construct URL: {base-url}/{schema-name}/{schema-name}-{version}.zip
             String artifactName = mapping.schemaName + "-" + mapping.version + ".zip";
             String url = baseUrl + "/" + mapping.schemaName + "/" + artifactName;
-            
+
             Logger.debug("Constructed download URL: {}", url);
-            
+
             Request request = new Request.Builder()
                 .url(url)
                 .get()
                 .build();
-            
+
             try (Response response = httpClient.newCall(request).execute()) {
                 Logger.debug("Response: {} {}", response.code(), response.message());
-                
+
                 if (!response.isSuccessful()) {
                     throw new IOException("HTTP " + response.code() + ": " + response.message() + " - URL: " + url);
                 }
-                
+
                 ResponseBody body = response.body();
                 if (body == null) {
                     throw new IOException("Empty response body from: " + url);
                 }
-                
+
                 Path downloadPath = workDirectory.resolve(artifactName);
-                
+
                 try (InputStream in = body.byteStream();
                      FileOutputStream out = new FileOutputStream(downloadPath.toFile())) {
-                    
+
                     byte[] buffer = new byte[8192];
                     int bytesRead;
                     while ((bytesRead = in.read(buffer)) != -1) {
                         out.write(buffer, 0, bytesRead);
                     }
                 }
-                
+
                 Logger.debug("Downloaded to: {}", downloadPath);
                 return downloadPath;
             }
@@ -517,24 +517,24 @@ public class FlywayProvisioner implements Callable<Integer> {
 
         Path extract(Path zipFile, SchemaMapping mapping) throws IOException {
             Path extractDir = workDirectory.resolve(mapping.schemaName);
-            
+
             if (!Files.exists(extractDir)) {
                 Files.createDirectories(extractDir);
             }
-            
+
             Logger.debug("Extracting ZIP to: {}", extractDir);
-            
+
             int filesExtracted = 0;
             try (ZipInputStream zis = new ZipInputStream(new FileInputStream(zipFile.toFile()))) {
                 ZipEntry entry;
                 while ((entry = zis.getNextEntry()) != null) {
                     Path entryPath = extractDir.resolve(entry.getName());
-                    
+
                     if (entry.isDirectory()) {
                         Files.createDirectories(entryPath);
                     } else {
                         Files.createDirectories(entryPath.getParent());
-                        
+
                         try (FileOutputStream fos = new FileOutputStream(entryPath.toFile())) {
                             byte[] buffer = new byte[8192];
                             int bytesRead;
@@ -544,11 +544,11 @@ public class FlywayProvisioner implements Callable<Integer> {
                         }
                         filesExtracted++;
                     }
-                    
+
                     zis.closeEntry();
                 }
             }
-            
+
             Logger.debug("Extracted {} file(s)", filesExtracted);
             return extractDir;
         }
@@ -572,7 +572,7 @@ public class FlywayProvisioner implements Callable<Integer> {
 
         void executeBaselineOnce() throws SQLException, IOException {
             Path baselinePath = Paths.get(baselineLocation);
-            
+
             // Execute baseline scripts in order
             List<Path> scripts = new ArrayList<>();
             try (var stream = Files.list(baselinePath)) {
@@ -580,16 +580,16 @@ public class FlywayProvisioner implements Callable<Integer> {
                       .sorted()
                       .forEach(scripts::add);
             }
-            
+
             if (scripts.isEmpty()) {
                 Logger.warn("No baseline scripts found in: {}", baselineLocation);
                 return;
             }
-            
+
             try (Connection conn = DriverManager.getConnection(jdbcUrl, username, password)) {
                 for (Path script : scripts) {
                     Logger.debug("Executing baseline script: {}", script.getFileName());
-                    
+
                     String sql = Files.readString(script);
                     executeSqlScript(conn, sql, script.getFileName().toString());
                 }
@@ -598,12 +598,12 @@ public class FlywayProvisioner implements Callable<Integer> {
 
         int migrate(SchemaMapping mapping) throws Exception {
             Logger.debug("Configuring Flyway for schema: {}", mapping.schemaName);
-            
+
             // Verify migrations directory exists
             if (!Files.exists(mapping.migrationsPath) || !Files.isDirectory(mapping.migrationsPath)) {
                 throw new IllegalStateException("Migrations path does not exist: " + mapping.migrationsPath);
             }
-            
+
             // Configure Flyway
             Flyway flyway = Flyway.configure()
                 .dataSource(jdbcUrl, username, password)
@@ -615,12 +615,12 @@ public class FlywayProvisioner implements Callable<Integer> {
                 .validateMigrationNaming(true)
                 .outOfOrder(false)
                 .load();
-            
+
             Logger.debug("Flyway configured with location: filesystem:{}", mapping.migrationsPath.toAbsolutePath());
-            
+
             // Execute migrations
             MigrateResult result = flyway.migrate();
-            
+
             // Track applied migrations for verbose reporting
             if (result.migrationsExecuted > 0) {
                 mapping.appliedMigrations = new ArrayList<>();
@@ -631,22 +631,22 @@ public class FlywayProvisioner implements Callable<Integer> {
                     }
                 }
             }
-            
+
             return result.migrationsExecuted;
         }
 
         private void executeSqlScript(Connection conn, String sql, String scriptName) throws SQLException {
             // Parse SQL statements properly, handling dollar-quoted strings
             List<String> statements = parseSqlStatements(sql);
-            
+
             for (String statement : statements) {
                 String trimmed = statement.trim();
                 if (trimmed.isEmpty() || trimmed.startsWith("--")) {
                     continue;
                 }
-                
+
                 Logger.debug("Executing SQL: {}", trimmed.substring(0, Math.min(60, trimmed.length())) + "...");
-                
+
                 try (Statement stmt = conn.createStatement()) {
                     stmt.execute(trimmed);
                 }
@@ -659,17 +659,17 @@ public class FlywayProvisioner implements Callable<Integer> {
             boolean inDollarQuote = false;
             String dollarTag = null;
             int i = 0;
-            
+
             while (i < sql.length()) {
                 char c = sql.charAt(i);
-                
+
                 // Check for dollar quote start/end
                 if (c == '$' && i + 1 < sql.length()) {
                     // Find the dollar quote tag
                     int tagEnd = sql.indexOf('$', i + 1);
                     if (tagEnd != -1) {
                         String tag = sql.substring(i, tagEnd + 1);
-                        
+
                         if (!inDollarQuote) {
                             // Start of dollar quote
                             inDollarQuote = true;
@@ -687,7 +687,7 @@ public class FlywayProvisioner implements Callable<Integer> {
                         }
                     }
                 }
-                
+
                 // If we're at a semicolon and not in a dollar quote, end statement
                 if (c == ';' && !inDollarQuote) {
                     String stmt = currentStatement.toString().trim();
@@ -698,17 +698,17 @@ public class FlywayProvisioner implements Callable<Integer> {
                     i++;
                     continue;
                 }
-                
+
                 currentStatement.append(c);
                 i++;
             }
-            
+
             // Add final statement if any
             String finalStmt = currentStatement.toString().trim();
             if (!finalStmt.isEmpty()) {
                 statements.add(finalStmt);
             }
-            
+
             return statements;
         }
 
