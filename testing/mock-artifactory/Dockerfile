@@ -4,9 +4,9 @@ FROM nginx:alpine
 RUN apk add --no-cache zip
 
 # Copy migration source files
-COPY ../test-artifacts/customer-migrations /tmp/customer-migrations
-COPY ../test-artifacts/orders-migrations /tmp/orders-migrations
-COPY ../test-artifacts/inventory-migrations /tmp/inventory-migrations
+COPY test-artifacts/customer-migrations /tmp/customer-migrations
+COPY test-artifacts/orders-migrations /tmp/orders-migrations
+COPY test-artifacts/inventory-migrations /tmp/inventory-migrations
 
 # Create artifact directory structure and generate ZIPs
 RUN mkdir -p /usr/share/nginx/html/migrations/customer \
