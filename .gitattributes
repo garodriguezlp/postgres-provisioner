@@ -1,0 +1,16 @@
+# Auto detect text files and normalize line endings to LF
+* text=auto
+
+# Force LF for shell scripts and Unix files
+*.sh text eol=lf
+*.bash text eol=lf
+Dockerfile* text eol=lf
+docker-entrypoint.sh text eol=lf
+*.sql text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Binary files
+*.jar binary
+*.class binary
+*.pyc binary
