@@ -591,7 +591,7 @@ public class FlywayProvisioner implements Callable<Integer> {
                     Logger.debug("Executing baseline script: {}", script.getFileName());
 
                     String sql = Files.readString(script);
-                    executeScriptBlindly(conn, sql, script.getFileName().toString());
+                    executeScriptUnified(conn, sql, script.getFileName().toString());
                 }
             }
         }
@@ -636,12 +636,12 @@ public class FlywayProvisioner implements Callable<Integer> {
         }
 
         /**
-         * Executes a SQL script "blindly" by using PostgreSQL's multi-statement execution.
+         * Executes a SQL script in a unified manner by using PostgreSQL's multi-statement execution.
          * This is simpler than parsing SQL and relies on the JDBC driver's ability to
          * handle complex SQL including DO blocks, dollar-quoted strings, etc.
          */
-        private void executeScriptBlindly(Connection conn, String sql, String scriptName) throws SQLException {
-            Logger.debug("Executing script blindly: {}", scriptName);
+        private void executeScriptUnified(Connection conn, String sql, String scriptName) throws SQLException {
+            Logger.debug("Executing script in unified mode: {}", scriptName);
             
             // Remove common comment patterns and trim
             String cleanedSql = sql.trim();
