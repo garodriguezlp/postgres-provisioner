@@ -10,11 +10,6 @@ testing/
 ├── postgres-ssh/                   # Custom PostgreSQL + SSH Docker image
 │   ├── Dockerfile
 │   └── docker-entrypoint.sh
-├── baseline-scripts/               # SQL baseline scripts
-│   ├── 01_create_schema_template.sql
-│   ├── 02_create_user_template.sql
-│   ├── 03_grant_permissions_template.sql
-│   └── README.md
 ├── test-artifacts/                 # Migration artifacts (ZIPs)
 │   ├── customer-migrations/        # Source SQL files
 │   ├── orders-migrations/
@@ -27,8 +22,11 @@ testing/
 ├── reset.sh                       # Reset (remove all data)
 ├── logs.sh                        # View logs
 ├── status.sh                      # Check environment status
-└── prepare-artifacts.sh           # Generate test ZIPs
+├── prepare-artifacts.sh           # Generate test ZIPs
+└── README.md                      # This file
 ```
+
+**Note**: Baseline SQL scripts are located in the project root at `../baseline-scripts/`, not in the testing directory.
 
 ## Prerequisites
 
@@ -157,7 +155,7 @@ jbang ../FlywayProvisioner.java \
   --db-url jdbc:postgresql://localhost:5432/testdb \
   --db-user postgres \
   --db-password testpass \
-  --baseline-location ./baseline-scripts \
+  --baseline-location ../baseline-scripts \
   --verbose
 ```
 
@@ -221,10 +219,6 @@ Edit [docker-compose.yml](docker-compose.yml) and [postgres-ssh/Dockerfile](post
 2. Add Flyway migration files (V1__*.sql, V2__*.sql, etc.)
 3. Update `prepare-artifacts.sh` to include the new schema
 4. Run `./prepare-artifacts.sh`
-
-### Modify Baseline Scripts
-
-Edit files in `baseline-scripts/` to change the default schema initialization behavior.
 
 ## Clean Up
 
