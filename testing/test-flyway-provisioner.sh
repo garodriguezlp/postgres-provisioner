@@ -45,7 +45,7 @@ echo ""
 # Run FlywayProvisioner using jbang
 jbang FlywayProvisioner.java \
     --artifactory-base-url=http://localhost:8080/migrations \
-    --schemas=customer:1.0.0,inventory:1.0.0,orders:1.0.0 \
+    --schemas=customer:1.5.0,inventory:1.0.0,orders:2.3.1 \
     --db-url=jdbc:postgresql://localhost:5432/testdb \
     --db-user=postgres \
     --db-password=testpass \

@@ -641,7 +641,7 @@ public class FlywayProvisioner implements Callable<Integer> {
 
             for (String statement : statements) {
                 String trimmed = statement.trim();
-                if (trimmed.isEmpty() || trimmed.startsWith("--")) {
+                if (trimmed.isEmpty()) {
                     continue;
                 }
 
@@ -657,11 +657,33 @@ public class FlywayProvisioner implements Callable<Integer> {
             List<String> statements = new ArrayList<>();
             StringBuilder currentStatement = new StringBuilder();
             boolean inDollarQuote = false;
+            boolean inLineComment = false;
             String dollarTag = null;
             int i = 0;
 
             while (i < sql.length()) {
                 char c = sql.charAt(i);
+
+                // Check for line comment
+                if (!inDollarQuote && !inLineComment && c == '-' && i + 1 < sql.length() && sql.charAt(i + 1) == '-') {
+                    inLineComment = true;
+                    i++;
+                    continue;
+                }
+
+                // End line comment at newline
+                if (inLineComment && c == '\n') {
+                    inLineComment = false;
+                    currentStatement.append(c);
+                    i++;
+                    continue;
+                }
+
+                // Skip characters in line comments
+                if (inLineComment) {
+                    i++;
+                    continue;
+                }
 
                 // Check for dollar quote start/end
                 if (c == '$' && i + 1 < sql.length()) {
