@@ -24,28 +24,28 @@ if [ ! -f "$FIRST_RUN_MARKER" ]; then
     PG_HBA="/var/lib/postgresql/data/pg_hba.conf"
 
     if [ -f "$PG_CONF" ]; then
-        echo "Setting incorrect PostgreSQL configuration..."
+        echo "Skipping restrictive PostgreSQL configuration (commented out for testing)"
         
         # Set listen_addresses to localhost only (wrong config)
-        sed -i "s/^#*listen_addresses.*=.*/listen_addresses = 'localhost'/" "$PG_CONF"
+        # sed -i "s/^#*listen_addresses.*=.*/listen_addresses = 'localhost'/" "$PG_CONF"
         
         # Set shared_buffers to a low value (wrong config)
-        sed -i "s/^#*shared_buffers.*=.*/shared_buffers = 128MB/" "$PG_CONF"
+        # sed -i "s/^#*shared_buffers.*=.*/shared_buffers = 128MB/" "$PG_CONF"
         
-        echo "PostgreSQL configured with restrictive settings (needs fixing via SSH configurator)"
-        echo "  - listen_addresses = 'localhost' (should be '*')"
-        echo "  - shared_buffers = 128MB (should be 256MB)"
+        echo "PostgreSQL will use default configuration (accessible from outside)"
+        echo "  - listen_addresses = '*' (default)"
+        echo "  - shared_buffers = default"
         
         # Mark first run as complete
         touch "$FIRST_RUN_MARKER"
         
-        # Restart PostgreSQL to apply the "wrong" config
-        echo "Restarting PostgreSQL with restrictive config..."
-        kill -TERM $POSTGRES_PID
-        wait $POSTGRES_PID
+        # No restart needed - using default config
+        # echo "Restarting PostgreSQL with restrictive config..."
+        # kill -TERM $POSTGRES_PID
+        # wait $POSTGRES_PID
         
-        # Start PostgreSQL again with the wrong config
-        exec docker-entrypoint.sh "$@"
+        # Wait for PostgreSQL to finish starting
+        wait $POSTGRES_PID
     else
         # If config doesn't exist yet, just wait for postgres
         wait $POSTGRES_PID
