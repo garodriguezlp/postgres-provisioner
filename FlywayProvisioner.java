@@ -642,15 +642,15 @@ public class FlywayProvisioner implements Callable<Integer> {
          */
         private void executeScriptUnified(Connection conn, String sql, String scriptName) throws SQLException {
             Logger.debug("Executing script in unified mode: {}", scriptName);
-            
+
             // Remove common comment patterns and trim
             String cleanedSql = sql.trim();
-            
+
             if (cleanedSql.isEmpty()) {
                 Logger.debug("Script is empty after cleaning, skipping");
                 return;
             }
-            
+
             try (Statement stmt = conn.createStatement()) {
                 // PostgreSQL JDBC driver can handle multiple statements separated by semicolons
                 // when executed in a single execute() call
