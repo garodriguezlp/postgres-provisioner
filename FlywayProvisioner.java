@@ -33,8 +33,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-// @todo: test this, but in order to decuple from the PostgresSshConfigurator, then comment out the posgtress config that messes up and prevents external client connection. because I want to try out this provisioning assuming db is ok. so I want to bring up the testing infra and everything to be in place. 
-
 /**
  * Flyway Migration Orchestrator - Automates database schema provisioning by downloading
  * migration artifacts and executing Flyway migrations with baseline initialization.
@@ -53,19 +51,6 @@ public class FlywayProvisioner implements Callable<Integer> {
         description = "Base URL for migration artifacts"
     )
     private String artifactoryBaseUrl;
-
-    // @todo: there is no auth needed, so remove all auth options
-    @Option(
-        names = {"--artifactory-user"},
-        description = "HTTP basic auth username (optional)"
-    )
-    private String artifactoryUser;
-
-    @Option(
-        names = {"--artifactory-password"},
-        description = "HTTP basic auth password (optional)"
-    )
-    private String artifactoryPassword;
 
     @Option(
         names = {"--schemas"},
@@ -102,17 +87,16 @@ public class FlywayProvisioner implements Callable<Integer> {
     )
     private String baselineLocation;
 
-    // @todo: I'd like this to be a new dir each time, but a humanfriendly timestamp and create the dir in the same java "home" where the java us running
     @Option(
         names = {"--work-dir"},
-        description = "Temporary directory for downloads and extraction (default: system temp)"
+        description = "Temporary directory for downloads and extraction (default: ./flyway-work-YYYYMMDD-HHMMSS)"
     )
     private String workDir;
 
     @Option(
         names = {"--cleanup"},
-        defaultValue = "true",
-        description = "Remove temporary files after execution (default: true)" // @todo: default this to false
+        defaultValue = "false",
+        description = "Remove temporary files after execution (default: false)"
     )
     private boolean cleanup;
 
@@ -168,152 +152,162 @@ public class FlywayProvisioner implements Callable<Integer> {
     }
 
     @Override
-    // @todo: call method is huge, remember that I love small methods, where things are a single level of abstraction, refactor this
     public Integer call() throws Exception {
         Instant startTime = Instant.now();
         
-        Logger.info("=".repeat(60));
-        Logger.info("Flyway Migration Orchestrator");
-        Logger.info("=".repeat(60));
+        printHeader();
         
         try {
-            // Parse schema mappings
-            Logger.info("→ Parsing schema configurations...");
-            List<SchemaMapping> schemaMappings = parseSchemas(schemas);
-            Logger.info("✓ Found {} schema(s) to process", schemaMappings.size());
+            List<SchemaMapping> schemaMappings = initializeAndValidate();
+            ArtifactDownloader downloader = new ArtifactDownloader(artifactoryBaseUrl, workDirectory);
             
-            // Initialize work directory
-            Logger.info("→ Initializing work directory...");
-            initializeWorkDirectory();
-            Logger.info("✓ Work directory: {}", workDirectory);
+            downloadAndExtractArtifacts(schemaMappings, downloader);
             
-            // Validate baseline location
-            Logger.info("→ Validating baseline scripts...");
-            validateBaselineLocation();
-            Logger.info("✓ Baseline location validated: {}", baselineLocation);
-            
-            // Download and extract artifacts
-            Logger.info("→ Downloading migration artifacts...");
-            ArtifactDownloader downloader = new ArtifactDownloader(
-                artifactoryBaseUrl, 
-                artifactoryUser, 
-                artifactoryPassword,
-                workDirectory
-            );
-            
-            for (int i = 0; i < schemaMappings.size(); i++) {
-                SchemaMapping mapping = schemaMappings.get(i);
-                Logger.info("  [{}/{}] Downloading schema '{}' v{}...", 
-                    i + 1, schemaMappings.size(), mapping.schemaName, mapping.version);
-                
-                try {
-                    Path artifactPath = downloader.download(mapping);
-                    Logger.info("  ✓ Downloaded {} ({} MB)", 
-                        artifactPath.getFileName(), 
-                        String.format("%.2f", Files.size(artifactPath) / 1024.0 / 1024.0));
-                    
-                    Logger.debug("  Extracting artifact...");
-                    Path extractedPath = downloader.extract(artifactPath, mapping);
-                    Logger.info("  ✓ Extracted to {}", extractedPath);
-                    
-                    mapping.migrationsPath = extractedPath;
-                    
-                } catch (Exception e) {
-                    Logger.error("  ✗ Failed to download/extract schema '{}': {}", 
-                        mapping.schemaName, e.getMessage());
-                    
-                    if (failFast) {
-                        throw e;
-                    }
-                    
-                    results.add(new MigrationResult(mapping, false, 0, 0, e.getMessage()));
-                    Logger.warn("  Skipping schema '{}', continuing with remaining schemas", mapping.schemaName);
-                }
-            }
-            
-            // Execute migrations
-            Logger.info("→ Executing database migrations...");
             DatabaseManager dbManager = new DatabaseManager(dbUrl, dbUser, dbPassword, baselineLocation);
+            executeBaselineOnce(dbManager, schemaMappings);
+            executeMigrations(schemaMappings, dbManager);
             
-            for (int i = 0; i < schemaMappings.size(); i++) {
-                SchemaMapping mapping = schemaMappings.get(i);
-                
-                // Skip if download/extraction failed
-                if (mapping.migrationsPath == null) {
-                    continue;
-                }
-                
-                Logger.info("  [{}/{}] Processing schema '{}'...", 
-                    i + 1, schemaMappings.size(), mapping.schemaName);
-                
-                try {
-                    Instant schemaStart = Instant.now();
-                    
-                    // @todo: this is not what I want, I made a mistake with the original spec. The baseline are a set of scripts that are run once at the very begining of the process, not per schema. refactor to adhere to that
-                    // @todo: make sure that in our sample baseline, we simply create all the schemas, regarless of the schema being processed, and users to connect to those schemas, where search path is set to the schema being processed. I mean this is like one script works for all schemas thing
-                    // Execute baseline
-                    Logger.info("    Executing baseline scripts...");
-                    dbManager.executeBaseline(mapping.schemaName);
-                    Logger.info("    ✓ Baseline completed");
-                    
-                    // Run Flyway migrations
-                    Logger.info("    Running Flyway migrations...");
-                    int migrationsApplied = dbManager.migrate(mapping);
-                    
-                    long durationSeconds = Duration.between(schemaStart, Instant.now()).getSeconds();
-                    Logger.info("    ✓ Applied {} migration(s) in {}s", migrationsApplied, durationSeconds);
-                    
-                    results.add(new MigrationResult(
-                        mapping, 
-                        true, 
-                        migrationsApplied, 
-                        durationSeconds, 
-                        null
-                    ));
-                    
-                } catch (Exception e) {
-                    Logger.error("    ✗ Migration failed for schema '{}': {}", 
-                        mapping.schemaName, e.getMessage());
-                    Logger.debug(e, "Migration error details");
-                    
-                    if (failFast) {
-                        throw e;
-                    }
-                    
-                    results.add(new MigrationResult(mapping, false, 0, 0, e.getMessage()));
-                    Logger.warn("    Skipping schema '{}', continuing with remaining schemas", mapping.schemaName);
-                }
-            }
-            
-            // Generate summary report
             long totalDurationSeconds = Duration.between(startTime, Instant.now()).getSeconds();
             generateSummaryReport(totalDurationSeconds);
             
-            // Cleanup if requested
-            if (cleanup) {
-                Logger.info("→ Cleaning up temporary files...");
-                cleanupWorkDirectory();
-                Logger.info("✓ Cleanup completed");
-            }
+            cleanupIfRequested();
             
-            // Determine exit code based on results
-            long failedCount = results.stream().filter(r -> !r.success).count();
-            if (failedCount > 0) {
-                Logger.warn("=".repeat(60));
-                Logger.warn("✗ Completed with {} failure(s)", failedCount);
-                Logger.warn("=".repeat(60));
-                return 1;
-            }
-            
-            Logger.info("=".repeat(60));
-            Logger.info("✓ All migrations completed successfully!");
-            Logger.info("=".repeat(60));
-            return 0;
+            return determineExitCode();
             
         } catch (Exception e) {
             Logger.error(e, "✗ Provisioning failed: {}", e.getMessage());
             return 1;
         }
+    }
+    
+    private void printHeader() {
+        Logger.info("=".repeat(60));
+        Logger.info("Flyway Migration Orchestrator");
+        Logger.info("=".repeat(60));
+    }
+    
+    private List<SchemaMapping> initializeAndValidate() throws IOException {
+        Logger.info("→ Parsing schema configurations...");
+        List<SchemaMapping> schemaMappings = parseSchemas(schemas);
+        Logger.info("✓ Found {} schema(s) to process", schemaMappings.size());
+        
+        Logger.info("→ Initializing work directory...");
+        initializeWorkDirectory();
+        Logger.info("✓ Work directory: {}", workDirectory);
+        
+        Logger.info("→ Validating baseline scripts...");
+        validateBaselineLocation();
+        Logger.info("✓ Baseline location validated: {}", baselineLocation);
+        
+        return schemaMappings;
+    }
+    
+    private void downloadAndExtractArtifacts(List<SchemaMapping> schemaMappings, ArtifactDownloader downloader) {
+        Logger.info("→ Downloading migration artifacts...");
+        
+        for (int i = 0; i < schemaMappings.size(); i++) {
+            SchemaMapping mapping = schemaMappings.get(i);
+            Logger.info("  [{}/{}] Downloading schema '{}' v{}...", 
+                i + 1, schemaMappings.size(), mapping.schemaName, mapping.version);
+            
+            try {
+                Path artifactPath = downloader.download(mapping);
+                Logger.info("  ✓ Downloaded {} ({} MB)", 
+                    artifactPath.getFileName(), 
+                    String.format("%.2f", Files.size(artifactPath) / 1024.0 / 1024.0));
+                
+                Logger.debug("  Extracting artifact...");
+                Path extractedPath = downloader.extract(artifactPath, mapping);
+                Logger.info("  ✓ Extracted to {}", extractedPath);
+                
+                mapping.migrationsPath = extractedPath;
+                
+            } catch (Exception e) {
+                Logger.error("  ✗ Failed to download/extract schema '{}': {}", 
+                    mapping.schemaName, e.getMessage());
+                
+                if (failFast) {
+                    throw new RuntimeException(e);
+                }
+                
+                results.add(new MigrationResult(mapping, false, 0, 0, e.getMessage()));
+                Logger.warn("  Skipping schema '{}', continuing with remaining schemas", mapping.schemaName);
+            }
+        }
+    }
+    
+    private void executeBaselineOnce(DatabaseManager dbManager, List<SchemaMapping> schemaMappings) throws SQLException, IOException {
+        Logger.info("→ Executing baseline scripts (once for all schemas)...");
+        
+        // Collect all schema names for baseline execution
+        List<String> schemaNames = schemaMappings.stream()
+            .map(m -> m.schemaName)
+            .toList();
+        
+        dbManager.executeBaselineOnce(schemaNames);
+        Logger.info("✓ Baseline completed for all schemas");
+    }
+    
+    private void executeMigrations(List<SchemaMapping> schemaMappings, DatabaseManager dbManager) {
+        Logger.info("→ Executing database migrations...");
+        
+        for (int i = 0; i < schemaMappings.size(); i++) {
+            SchemaMapping mapping = schemaMappings.get(i);
+            
+            if (mapping.migrationsPath == null) {
+                continue;
+            }
+            
+            Logger.info("  [{}/{}] Processing schema '{}'...", 
+                i + 1, schemaMappings.size(), mapping.schemaName);
+            
+            try {
+                Instant schemaStart = Instant.now();
+                
+                Logger.info("    Running Flyway migrations...");
+                int migrationsApplied = dbManager.migrate(mapping);
+                
+                long durationSeconds = Duration.between(schemaStart, Instant.now()).getSeconds();
+                Logger.info("    ✓ Applied {} migration(s) in {}s", migrationsApplied, durationSeconds);
+                
+                results.add(new MigrationResult(mapping, true, migrationsApplied, durationSeconds, null));
+                
+            } catch (Exception e) {
+                Logger.error("    ✗ Migration failed for schema '{}': {}", 
+                    mapping.schemaName, e.getMessage());
+                Logger.debug(e, "Migration error details");
+                
+                if (failFast) {
+                    throw new RuntimeException(e);
+                }
+                
+                results.add(new MigrationResult(mapping, false, 0, 0, e.getMessage()));
+                Logger.warn("    Skipping schema '{}', continuing with remaining schemas", mapping.schemaName);
+            }
+        }
+    }
+    
+    private void cleanupIfRequested() {
+        if (cleanup) {
+            Logger.info("→ Cleaning up temporary files...");
+            cleanupWorkDirectory();
+            Logger.info("✓ Cleanup completed");
+        }
+    }
+    
+    private int determineExitCode() {
+        long failedCount = results.stream().filter(r -> !r.success).count();
+        if (failedCount > 0) {
+            Logger.warn("=".repeat(60));
+            Logger.warn("✗ Completed with {} failure(s)", failedCount);
+            Logger.warn("=".repeat(60));
+            return 1;
+        }
+        
+        Logger.info("=".repeat(60));
+        Logger.info("✓ All migrations completed successfully!");
+        Logger.info("=".repeat(60));
+        return 0;
     }
 
     private List<SchemaMapping> parseSchemas(String schemasStr) {
@@ -339,7 +333,11 @@ public class FlywayProvisioner implements Callable<Integer> {
         if (workDir != null && !workDir.isEmpty()) {
             workDirectory = Paths.get(workDir);
         } else {
-            workDirectory = Files.createTempDirectory("flyway-work-");
+            // Create timestamp-based directory name in current directory
+            String timestamp = java.time.format.DateTimeFormatter
+                .ofPattern("yyyyMMdd-HHmmss")
+                .format(java.time.LocalDateTime.now());
+            workDirectory = Paths.get(".").resolve("flyway-work-" + timestamp);
         }
         
         if (!Files.exists(workDirectory)) {
@@ -464,33 +462,18 @@ public class FlywayProvisioner implements Callable<Integer> {
      */
     static class ArtifactDownloader {
         private final String baseUrl;
-        private final String username;
-        private final String password;
         private final Path workDirectory;
         private final OkHttpClient httpClient;
 
-        ArtifactDownloader(String baseUrl, String username, String password, Path workDirectory) {
+        ArtifactDownloader(String baseUrl, Path workDirectory) {
             this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-            this.username = username;
-            this.password = password;
             this.workDirectory = workDirectory;
             
-            OkHttpClient.Builder builder = new OkHttpClient.Builder()
+            this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
-                .writeTimeout(60, TimeUnit.SECONDS);
-            
-            // Add basic auth if credentials provided
-            if (username != null && !username.isEmpty() && password != null && !password.isEmpty()) {
-                builder.authenticator((route, response) -> {
-                    String credential = Credentials.basic(username, password);
-                    return response.request().newBuilder()
-                        .header("Authorization", credential)
-                        .build();
-                });
-            }
-            
-            this.httpClient = builder.build();
+                .writeTimeout(60, TimeUnit.SECONDS)
+                .build();
         }
 
         Path download(SchemaMapping mapping) throws IOException {
@@ -589,7 +572,7 @@ public class FlywayProvisioner implements Callable<Integer> {
             this.baselineLocation = baselineLocation;
         }
 
-        void executeBaseline(String schemaName) throws SQLException, IOException {
+        void executeBaselineOnce(List<String> schemaNames) throws SQLException, IOException {
             Path baselinePath = Paths.get(baselineLocation);
             
             // Execute baseline scripts in order
@@ -611,12 +594,14 @@ public class FlywayProvisioner implements Callable<Integer> {
                     
                     String sql = Files.readString(script);
                     
-                    // Replace placeholders
-                    sql = sql.replace("${schema_name}", schemaName);
+                    // Replace database name placeholder
                     sql = sql.replace("${database_name}", getDatabaseName(jdbcUrl));
                     
-                    // Execute SQL statements
-                    executeSqlScript(conn, sql, script.getFileName().toString());
+                    // For each schema, execute the script with schema-specific replacements
+                    for (String schemaName : schemaNames) {
+                        String schemaSql = sql.replace("${schema_name}", schemaName);
+                        executeSqlScript(conn, schemaSql, script.getFileName().toString());
+                    }
                 }
             }
         }
