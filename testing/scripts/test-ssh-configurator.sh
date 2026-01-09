@@ -5,7 +5,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-cd "$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
 
 echo "=================================================="
 echo "  PostgresSshConfigurator End-to-End Test"
@@ -45,7 +45,6 @@ echo ""
 # Step 3: Verify configuration was fixed
 echo "Step 3: Verifying PostgreSQL configuration was fixed..."
 echo "------------------------------------------------------"
-cd "$SCRIPT_DIR"
 
 # Restart container to ensure config is applied
 echo "Restarting container to apply configuration..."
