@@ -591,7 +591,7 @@ public class FlywayProvisioner implements Callable<Integer> {
                     Logger.debug("Executing baseline script: {}", script.getFileName());
 
                     String sql = Files.readString(script);
-                    executeSqlScript(conn, sql, script.getFileName().toString());
+                    executeScriptBlindly(conn, sql, script.getFileName().toString());
                 }
             }
         }
@@ -635,103 +635,31 @@ public class FlywayProvisioner implements Callable<Integer> {
             return result.migrationsExecuted;
         }
 
-        private void executeSqlScript(Connection conn, String sql, String scriptName) throws SQLException {
-            // Parse SQL statements properly, handling dollar-quoted strings
-            List<String> statements = parseSqlStatements(sql);
-
-            for (String statement : statements) {
-                String trimmed = statement.trim();
-                if (trimmed.isEmpty()) {
-                    continue;
-                }
-
-                Logger.debug("Executing SQL: {}", trimmed.substring(0, Math.min(60, trimmed.length())) + "...");
-
-                try (Statement stmt = conn.createStatement()) {
-                    stmt.execute(trimmed);
-                }
+        /**
+         * Executes a SQL script "blindly" by using PostgreSQL's multi-statement execution.
+         * This is simpler than parsing SQL and relies on the JDBC driver's ability to
+         * handle complex SQL including DO blocks, dollar-quoted strings, etc.
+         */
+        private void executeScriptBlindly(Connection conn, String sql, String scriptName) throws SQLException {
+            Logger.debug("Executing script blindly: {}", scriptName);
+            
+            // Remove common comment patterns and trim
+            String cleanedSql = sql.trim();
+            
+            if (cleanedSql.isEmpty()) {
+                Logger.debug("Script is empty after cleaning, skipping");
+                return;
             }
-        }
-
-        private List<String> parseSqlStatements(String sql) {
-            List<String> statements = new ArrayList<>();
-            StringBuilder currentStatement = new StringBuilder();
-            boolean inDollarQuote = false;
-            boolean inLineComment = false;
-            String dollarTag = null;
-            int i = 0;
-
-            while (i < sql.length()) {
-                char c = sql.charAt(i);
-
-                // Check for line comment
-                if (!inDollarQuote && !inLineComment && c == '-' && i + 1 < sql.length() && sql.charAt(i + 1) == '-') {
-                    inLineComment = true;
-                    i++;
-                    continue;
-                }
-
-                // End line comment at newline
-                if (inLineComment && c == '\n') {
-                    inLineComment = false;
-                    currentStatement.append(c);
-                    i++;
-                    continue;
-                }
-
-                // Skip characters in line comments
-                if (inLineComment) {
-                    i++;
-                    continue;
-                }
-
-                // Check for dollar quote start/end
-                if (c == '$' && i + 1 < sql.length()) {
-                    // Find the dollar quote tag
-                    int tagEnd = sql.indexOf('$', i + 1);
-                    if (tagEnd != -1) {
-                        String tag = sql.substring(i, tagEnd + 1);
-
-                        if (!inDollarQuote) {
-                            // Start of dollar quote
-                            inDollarQuote = true;
-                            dollarTag = tag;
-                            currentStatement.append(tag);
-                            i = tagEnd + 1;
-                            continue;
-                        } else if (tag.equals(dollarTag)) {
-                            // End of dollar quote
-                            inDollarQuote = false;
-                            currentStatement.append(tag);
-                            dollarTag = null;
-                            i = tagEnd + 1;
-                            continue;
-                        }
-                    }
-                }
-
-                // If we're at a semicolon and not in a dollar quote, end statement
-                if (c == ';' && !inDollarQuote) {
-                    String stmt = currentStatement.toString().trim();
-                    if (!stmt.isEmpty()) {
-                        statements.add(stmt);
-                    }
-                    currentStatement = new StringBuilder();
-                    i++;
-                    continue;
-                }
-
-                currentStatement.append(c);
-                i++;
+            
+            try (Statement stmt = conn.createStatement()) {
+                // PostgreSQL JDBC driver can handle multiple statements separated by semicolons
+                // when executed in a single execute() call
+                stmt.execute(cleanedSql);
+                Logger.debug("Successfully executed script: {}", scriptName);
+            } catch (SQLException e) {
+                Logger.error("Failed to execute script {}: {}", scriptName, e.getMessage());
+                throw e;
             }
-
-            // Add final statement if any
-            String finalStmt = currentStatement.toString().trim();
-            if (!finalStmt.isEmpty()) {
-                statements.add(finalStmt);
-            }
-
-            return statements;
         }
 
         private String getDatabaseName(String jdbcUrl) {
