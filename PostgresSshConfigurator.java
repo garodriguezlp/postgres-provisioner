@@ -150,7 +150,6 @@ public class PostgresSshConfigurator implements Callable<Integer> {
             // Modify configs
             Logger.info("→ Modifying PostgreSQL configuration...");
             modifyPostgresqlConf(configDir);
-            modifyPgHbaConf(configDir);
             Logger.info("✓ Configuration modified");
             
             // Restart PostgreSQL
@@ -197,41 +196,20 @@ public class PostgresSshConfigurator implements Callable<Integer> {
             return normalizedPath;
         }
         
-        // Try common locations
-        String[] possiblePaths = {
-            "/etc/postgresql/" + pgVersion + "/main",
-            "/var/lib/pgsql/" + pgVersion + "/data",
-            "/usr/local/pgsql/data",
-            "/var/lib/postgresql/" + pgVersion + "/main",
-            "/var/lib/postgresql/data"
-        };
-        
-        for (String path : possiblePaths) {
-            Logger.debug("Checking path: {}", path);
-            String result = sshExecutor.executeCommand("sudo test -f " + path + "/postgresql.conf && echo 'found' || echo 'not found'");
-            if (result.trim().equals("found")) {
-                Logger.debug("Found config at: {}", path);
-                return path;
-            }
-        }
-        
-        throw new RuntimeException("Could not locate PostgreSQL configuration directory. Please specify --pg-config-path");
+        // Use default PostgreSQL configuration directory
+        String defaultPath = "/var/lib/postgresql/data";
+        Logger.debug("Using default config path: {}", defaultPath);
+        return defaultPath;
     }
 
     private void backupConfigs(String configDir) throws Exception {
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
         
         String postgresqlConf = configDir + "/postgresql.conf";
-        String pgHbaConf = configDir + "/pg_hba.conf";
-        
         String postgresqlBackup = postgresqlConf + "." + timestamp + ".backup";
-        String pgHbaBackup = pgHbaConf + "." + timestamp + ".backup";
         
         Logger.debug("Backing up {} to {}", postgresqlConf, postgresqlBackup);
         sshExecutor.executeCommand("sudo cp " + postgresqlConf + " " + postgresqlBackup);
-        
-        Logger.debug("Backing up {} to {}", pgHbaConf, pgHbaBackup);
-        sshExecutor.executeCommand("sudo cp " + pgHbaConf + " " + pgHbaBackup);
     }
 
     private void modifyPostgresqlConf(String configDir) throws Exception {
@@ -266,28 +244,6 @@ public class PostgresSshConfigurator implements Callable<Integer> {
         Logger.debug("shared_buffers: {}", sharedBuf.trim());
     }
 
-    private void modifyPgHbaConf(String configDir) throws Exception {
-        String confFile = configDir + "/pg_hba.conf";
-        
-        Logger.debug("Modifying {}", confFile);
-        
-        // Add entry for remote connections if not exists
-        String entry = "host    all             all             0.0.0.0/0               md5";
-        String checkCmd = "sudo grep -q \"^host.*all.*all.*0.0.0.0/0\" " + confFile + " && echo 'exists' || echo 'not exists'";
-        String result = sshExecutor.executeCommand(checkCmd);
-        
-        if (result.trim().equals("not exists")) {
-            Logger.debug("Adding remote access entry to pg_hba.conf");
-            sshExecutor.executeCommand("echo \"" + entry + "\" | sudo tee -a " + confFile);
-        } else {
-            Logger.debug("Remote access entry already exists in pg_hba.conf");
-        }
-        
-        // Verify changes
-        Logger.debug("Verifying pg_hba.conf changes...");
-        String hbaContents = sshExecutor.executeCommand("sudo grep \"^host.*all.*all.*0.0.0.0/0\" " + confFile);
-        Logger.debug("pg_hba.conf entry: {}", hbaContents.trim());
-    }
 
     private void restartPostgreSQL() throws Exception {
         // Try different restart methods
