@@ -50,35 +50,40 @@ public class FlywayProvisioner implements Callable<Integer> {
 
     @Option(
         names = {"--artifactory-base-url"},
-        required = true,
+        required = false,
+        defaultValue = "http://localhost:8080/migrations",
         description = "Base URL for migration artifacts"
     )
     private String artifactoryBaseUrl;
 
     @Option(
         names = {"--schemas"},
-        required = true,
+        required = false,
+        defaultValue = "customer:1.5.0,inventory:1.0.0,orders:2.3.1",
         description = "Comma-separated schema:version pairs (e.g., customer:1.5.0,orders:2.3.1)"
     )
     private String schemas;
 
     @Option(
         names = {"--db-url"},
-        required = true,
+        required = false,
+        defaultValue = "jdbc:postgresql://localhost:5432/testdb",
         description = "JDBC connection URL for PostgreSQL database"
     )
     private String dbUrl;
 
     @Option(
         names = {"--db-user"},
-        required = true,
+        required = false,
+        defaultValue = "postgres",
         description = "Database username with schema creation privileges"
     )
     private String dbUser;
 
     @Option(
         names = {"--db-password"},
-        required = true,
+        required = false,
+        defaultValue = "testpass",
         description = "Database password"
     )
     private String dbPassword;
@@ -92,7 +97,7 @@ public class FlywayProvisioner implements Callable<Integer> {
 
     @Option(
         names = {"--work-dir"},
-        description = "Temporary directory for downloads and extraction (default: ./flyway-work-YYYYMMDD-HHMMSS)"
+        description = "Working directory for downloads and extraction (default: ./output/flyway-YYYYMMDD-HHMMSS)"
     )
     private String workDir;
 
@@ -120,23 +125,23 @@ public class FlywayProvisioner implements Callable<Integer> {
     private final List<MigrationResult> results = new ArrayList<>();
 
     static {
-        configureLogging();
+        configureLogging(false);
     }
 
-    private static void configureLogging() {
-        // Check for verbose flag in args
-        String level = "INFO";
-        for (String arg : System.getProperty("sun.java.command", "").split(" ")) {
-            if (arg.equals("--verbose") || arg.equals("-v")) {
-                level = "DEBUG";
-                break;
-            }
-        }
+    private static void configureLogging(boolean verbose) {
+        String level = verbose ? "DEBUG" : "INFO";
 
         Map<String, String> config = new HashMap<>();
         config.put("writer", "console");
         config.put("writer.format", "{date: yyyy-MM-dd HH:mm:ss} {level|min-size=5} [{thread}] {class-name} - {message}");
         config.put("writer.level", level);
+
+        // Configure Flyway-specific loggers for more detailed output when verbose
+        if (verbose) {
+            config.put("level@org.flywaydb", "DEBUG");
+            config.put("level@org.flywaydb.core", "DEBUG");
+        }
+
         Configuration.replace(config);
     }
 
@@ -156,6 +161,12 @@ public class FlywayProvisioner implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
+        // Reconfigure logging now that we have the actual verbose flag
+        if (verbose) {
+            configureLogging(true);
+            Logger.debug("Verbose logging enabled");
+        }
+
         Instant startTime = Instant.now();
 
         printHeader();
@@ -190,23 +201,23 @@ public class FlywayProvisioner implements Callable<Integer> {
     }
 
     private List<SchemaMapping> initializeAndValidate() throws IOException {
-        Logger.info("→ Parsing schema configurations...");
+        Logger.info("--> Parsing schema configurations...");
         List<SchemaMapping> schemaMappings = parseSchemas(schemas);
-        Logger.info("✓ Found {} schema(s) to process", schemaMappings.size());
+        Logger.info("[OK] Found {} schema(s) to process", schemaMappings.size());
 
-        Logger.info("→ Initializing work directory...");
+        Logger.info("--> Initializing work directory...");
         initializeWorkDirectory();
-        Logger.info("✓ Work directory: {}", workDirectory);
+        Logger.info("[OK] Work directory: {}", workDirectory);
 
-        Logger.info("→ Validating baseline scripts...");
+        Logger.info("--> Validating baseline scripts...");
         validateBaselineLocation();
-        Logger.info("✓ Baseline location validated: {}", baselineLocation);
+        Logger.info("[OK] Baseline location validated: {}", baselineLocation);
 
         return schemaMappings;
     }
 
     private void downloadAndExtractArtifacts(List<SchemaMapping> schemaMappings, ArtifactDownloader downloader) {
-        Logger.info("→ Downloading migration artifacts...");
+        Logger.info("--> Downloading migration artifacts...");
 
         for (int i = 0; i < schemaMappings.size(); i++) {
             SchemaMapping mapping = schemaMappings.get(i);
@@ -215,18 +226,18 @@ public class FlywayProvisioner implements Callable<Integer> {
 
             try {
                 Path artifactPath = downloader.download(mapping);
-                Logger.info("  ✓ Downloaded {} ({} MB)",
+                Logger.info("  [OK] Downloaded {} ({} MB)",
                     artifactPath.getFileName(),
                     String.format("%.2f", Files.size(artifactPath) / 1024.0 / 1024.0));
 
                 Logger.debug("  Extracting artifact...");
                 Path extractedPath = downloader.extract(artifactPath, mapping);
-                Logger.info("  ✓ Extracted to {}", extractedPath);
+                Logger.info("  [OK] Extracted to {}", extractedPath);
 
                 mapping.migrationsPath = extractedPath;
 
             } catch (Exception e) {
-                Logger.error("  ✗ Failed to download/extract schema '{}': {}",
+                Logger.error("  [FAIL] Failed to download/extract schema '{}': {}",
                     mapping.schemaName, e.getMessage());
 
                 if (failFast) {
@@ -240,14 +251,14 @@ public class FlywayProvisioner implements Callable<Integer> {
     }
 
     private void executeBaselineOnce(DatabaseManager dbManager, List<SchemaMapping> schemaMappings) throws SQLException, IOException {
-        Logger.info("→ Executing baseline scripts...");
+        Logger.info("--> Executing baseline scripts...");
 
         dbManager.executeBaselineOnce();
-        Logger.info("✓ Baseline completed");
+        Logger.info("[OK] Baseline completed");
     }
 
     private void executeMigrations(List<SchemaMapping> schemaMappings, DatabaseManager dbManager) {
-        Logger.info("→ Executing database migrations...");
+        Logger.info("--> Executing database migrations...");
 
         for (int i = 0; i < schemaMappings.size(); i++) {
             SchemaMapping mapping = schemaMappings.get(i);
@@ -263,15 +274,15 @@ public class FlywayProvisioner implements Callable<Integer> {
                 Instant schemaStart = Instant.now();
 
                 Logger.info("    Running Flyway migrations...");
-                int migrationsApplied = dbManager.migrate(mapping);
+                int migrationsApplied = dbManager.migrate(mapping, verbose);
 
                 long durationSeconds = Duration.between(schemaStart, Instant.now()).getSeconds();
-                Logger.info("    ✓ Applied {} migration(s) in {}s", migrationsApplied, durationSeconds);
+                Logger.info("    [OK] Applied {} migration(s) in {}s", migrationsApplied, durationSeconds);
 
                 results.add(new MigrationResult(mapping, true, migrationsApplied, durationSeconds, null));
 
             } catch (Exception e) {
-                Logger.error("    ✗ Migration failed for schema '{}': {}",
+                Logger.error("    [FAIL] Migration failed for schema '{}': {}",
                     mapping.schemaName, e.getMessage());
                 Logger.debug(e, "Migration error details");
 
@@ -287,9 +298,9 @@ public class FlywayProvisioner implements Callable<Integer> {
 
     private void cleanupIfRequested() {
         if (cleanup) {
-            Logger.info("→ Cleaning up temporary files...");
+            Logger.info("--> Cleaning up temporary files...");
             cleanupWorkDirectory();
-            Logger.info("✓ Cleanup completed");
+            Logger.info("[OK] Cleanup completed");
         }
     }
 
@@ -297,13 +308,13 @@ public class FlywayProvisioner implements Callable<Integer> {
         long failedCount = results.stream().filter(r -> !r.success).count();
         if (failedCount > 0) {
             Logger.warn("=".repeat(60));
-            Logger.warn("✗ Completed with {} failure(s)", failedCount);
+            Logger.warn("[FAIL] Completed with {} failure(s)", failedCount);
             Logger.warn("=".repeat(60));
             return 1;
         }
 
         Logger.info("=".repeat(60));
-        Logger.info("✓ All migrations completed successfully!");
+        Logger.info("[OK] All migrations completed successfully!");
         Logger.info("=".repeat(60));
         return 0;
     }
@@ -331,11 +342,11 @@ public class FlywayProvisioner implements Callable<Integer> {
         if (workDir != null && !workDir.isEmpty()) {
             workDirectory = Paths.get(workDir);
         } else {
-            // Create timestamp-based directory name in current directory
+            // Create timestamp-based directory name in output directory
             String timestamp = java.time.format.DateTimeFormatter
                 .ofPattern("yyyyMMdd-HHmmss")
                 .format(java.time.LocalDateTime.now());
-            workDirectory = Paths.get(".").resolve("flyway-work-" + timestamp);
+            workDirectory = Paths.get(".").resolve("output").resolve("flyway-" + timestamp);
         }
 
         if (!Files.exists(workDirectory)) {
@@ -398,7 +409,7 @@ public class FlywayProvisioner implements Callable<Integer> {
 
         for (MigrationResult result : results) {
             if (result.success) {
-                Logger.info("  ✓ {} (v{}) - {}s - {} migration(s) applied",
+                Logger.info("  [OK] {} (v{}) - {}s - {} migration(s) applied",
                     result.mapping.schemaName,
                     result.mapping.version,
                     result.durationSeconds,
@@ -410,7 +421,7 @@ public class FlywayProvisioner implements Callable<Integer> {
                     }
                 }
             } else {
-                Logger.info("  ✗ {} (v{}) - FAILED - {}",
+                Logger.info("  [FAIL] {} (v{}) - FAILED - {}",
                     result.mapping.schemaName,
                     result.mapping.version,
                     result.errorMessage);
@@ -596,7 +607,7 @@ public class FlywayProvisioner implements Callable<Integer> {
             }
         }
 
-        int migrate(SchemaMapping mapping) throws Exception {
+        int migrate(SchemaMapping mapping, boolean verbose) throws Exception {
             Logger.debug("Configuring Flyway for schema: {}", mapping.schemaName);
 
             // Verify migrations directory exists
@@ -604,8 +615,8 @@ public class FlywayProvisioner implements Callable<Integer> {
                 throw new IllegalStateException("Migrations path does not exist: " + mapping.migrationsPath);
             }
 
-            // Configure Flyway
-            Flyway flyway = Flyway.configure()
+            // Configure Flyway with verbose output if requested
+            var flywayConfig = Flyway.configure()
                 .dataSource(jdbcUrl, username, password)
                 .locations("filesystem:" + mapping.migrationsPath.toAbsolutePath())
                 .schemas(mapping.schemaName)
@@ -613,8 +624,14 @@ public class FlywayProvisioner implements Callable<Integer> {
                 .baselineOnMigrate(true)
                 .baselineVersion("0")
                 .validateMigrationNaming(true)
-                .outOfOrder(false)
-                .load();
+                .outOfOrder(false);
+
+            // Enable Flyway console output in verbose mode
+            if (verbose) {
+                flywayConfig.loggers("auto");
+            }
+
+            Flyway flyway = flywayConfig.load();
 
             Logger.debug("Flyway configured with location: filesystem:{}", mapping.migrationsPath.toAbsolutePath());
 
