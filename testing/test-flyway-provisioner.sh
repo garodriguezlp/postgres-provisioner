@@ -14,7 +14,7 @@ echo ""
 
 # Check if services are running
 echo "→ Checking if services are running..."
-if ! docker ps | grep -q postgres-provisioner-test; then
+if ! docker ps | grep -q testing-postgres-ssh; then
     echo "❌ PostgreSQL container is not running!"
     echo "   Run './testing/up.sh' first to start the infrastructure"
     exit 1
@@ -31,7 +31,7 @@ echo ""
 
 # Test PostgreSQL connection
 echo "→ Testing PostgreSQL connection..."
-if docker exec postgres-provisioner-test-postgres-ssh-1 psql -U postgres -d testdb -c "SELECT 1;" >/dev/null 2>&1; then
+if docker exec testing-postgres-ssh-1 psql -U postgres -d testdb -c "SELECT 1;" >/dev/null 2>&1; then
     echo "✓ PostgreSQL is accessible"
 else
     echo "❌ Cannot connect to PostgreSQL"
@@ -65,14 +65,14 @@ if [ $RESULT -eq 0 ]; then
     echo ""
     
     # Check if schemas were created
-    docker exec postgres-provisioner-test-postgres-ssh-1 psql -U postgres -d testdb -c "\dn" | grep -E "customer|inventory|orders" || echo "Note: Check schema creation"
+    docker exec testing-postgres-ssh-1 psql -U postgres -d testdb -c "\dn" | grep -E "customer|inventory|orders" || echo "Note: Check schema creation"
     
     echo ""
     echo "→ Checking Flyway schema history..."
     for schema in customer inventory orders; do
         echo ""
         echo "Schema: $schema"
-        docker exec postgres-provisioner-test-postgres-ssh-1 psql -U postgres -d testdb -c "SELECT version, description, type, installed_on FROM $schema.flyway_schema_history ORDER BY installed_rank;" || echo "  (Schema history not found)"
+        docker exec testing-postgres-ssh-1 psql -U postgres -d testdb -c "SELECT version, description, type, installed_on FROM $schema.flyway_schema_history ORDER BY installed_rank;" || echo "  (Schema history not found)"
     done
 else
     echo "❌ FlywayProvisioner failed with exit code: $RESULT"

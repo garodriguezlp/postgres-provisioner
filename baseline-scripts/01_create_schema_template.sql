@@ -1,12 +1,12 @@
--- Create schema if not exists
-CREATE SCHEMA IF NOT EXISTS ${schema_name};
-
--- Set default search path for the database
--- Note: This sets it for the current session
-SET search_path TO ${schema_name}, public;
+-- Create all schemas
+CREATE SCHEMA IF NOT EXISTS customer;
+CREATE SCHEMA IF NOT EXISTS inventory;
+CREATE SCHEMA IF NOT EXISTS orders;
 
 -- Log creation
 DO $$
 BEGIN
-    RAISE NOTICE 'Schema ${schema_name} created or already exists';
+    RAISE NOTICE 'Schema customer created or already exists';
+    RAISE NOTICE 'Schema inventory created or already exists';
+    RAISE NOTICE 'Schema orders created or already exists';
 END $$;

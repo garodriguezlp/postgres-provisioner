@@ -13,7 +13,10 @@
 
 //FILES application.properties=application.properties
 
-import com.squareup.okhttp3.*;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.output.MigrateResult;
@@ -237,15 +240,10 @@ public class FlywayProvisioner implements Callable<Integer> {
     }
     
     private void executeBaselineOnce(DatabaseManager dbManager, List<SchemaMapping> schemaMappings) throws SQLException, IOException {
-        Logger.info("→ Executing baseline scripts (once for all schemas)...");
+        Logger.info("→ Executing baseline scripts...");
         
-        // Collect all schema names for baseline execution
-        List<String> schemaNames = schemaMappings.stream()
-            .map(m -> m.schemaName)
-            .toList();
-        
-        dbManager.executeBaselineOnce(schemaNames);
-        Logger.info("✓ Baseline completed for all schemas");
+        dbManager.executeBaselineOnce();
+        Logger.info("✓ Baseline completed");
     }
     
     private void executeMigrations(List<SchemaMapping> schemaMappings, DatabaseManager dbManager) {
@@ -572,7 +570,7 @@ public class FlywayProvisioner implements Callable<Integer> {
             this.baselineLocation = baselineLocation;
         }
 
-        void executeBaselineOnce(List<String> schemaNames) throws SQLException, IOException {
+        void executeBaselineOnce() throws SQLException, IOException {
             Path baselinePath = Paths.get(baselineLocation);
             
             // Execute baseline scripts in order
@@ -593,15 +591,7 @@ public class FlywayProvisioner implements Callable<Integer> {
                     Logger.debug("Executing baseline script: {}", script.getFileName());
                     
                     String sql = Files.readString(script);
-                    
-                    // Replace database name placeholder
-                    sql = sql.replace("${database_name}", getDatabaseName(jdbcUrl));
-                    
-                    // For each schema, execute the script with schema-specific replacements
-                    for (String schemaName : schemaNames) {
-                        String schemaSql = sql.replace("${schema_name}", schemaName);
-                        executeSqlScript(conn, schemaSql, script.getFileName().toString());
-                    }
+                    executeSqlScript(conn, sql, script.getFileName().toString());
                 }
             }
         }
@@ -646,8 +636,8 @@ public class FlywayProvisioner implements Callable<Integer> {
         }
 
         private void executeSqlScript(Connection conn, String sql, String scriptName) throws SQLException {
-            // Split by semicolon and execute each statement
-            String[] statements = sql.split(";");
+            // Parse SQL statements properly, handling dollar-quoted strings
+            List<String> statements = parseSqlStatements(sql);
             
             for (String statement : statements) {
                 String trimmed = statement.trim();
@@ -661,6 +651,65 @@ public class FlywayProvisioner implements Callable<Integer> {
                     stmt.execute(trimmed);
                 }
             }
+        }
+
+        private List<String> parseSqlStatements(String sql) {
+            List<String> statements = new ArrayList<>();
+            StringBuilder currentStatement = new StringBuilder();
+            boolean inDollarQuote = false;
+            String dollarTag = null;
+            int i = 0;
+            
+            while (i < sql.length()) {
+                char c = sql.charAt(i);
+                
+                // Check for dollar quote start/end
+                if (c == '$' && i + 1 < sql.length()) {
+                    // Find the dollar quote tag
+                    int tagEnd = sql.indexOf('$', i + 1);
+                    if (tagEnd != -1) {
+                        String tag = sql.substring(i, tagEnd + 1);
+                        
+                        if (!inDollarQuote) {
+                            // Start of dollar quote
+                            inDollarQuote = true;
+                            dollarTag = tag;
+                            currentStatement.append(tag);
+                            i = tagEnd + 1;
+                            continue;
+                        } else if (tag.equals(dollarTag)) {
+                            // End of dollar quote
+                            inDollarQuote = false;
+                            currentStatement.append(tag);
+                            dollarTag = null;
+                            i = tagEnd + 1;
+                            continue;
+                        }
+                    }
+                }
+                
+                // If we're at a semicolon and not in a dollar quote, end statement
+                if (c == ';' && !inDollarQuote) {
+                    String stmt = currentStatement.toString().trim();
+                    if (!stmt.isEmpty()) {
+                        statements.add(stmt);
+                    }
+                    currentStatement = new StringBuilder();
+                    i++;
+                    continue;
+                }
+                
+                currentStatement.append(c);
+                i++;
+            }
+            
+            // Add final statement if any
+            String finalStmt = currentStatement.toString().trim();
+            if (!finalStmt.isEmpty()) {
+                statements.add(finalStmt);
+            }
+            
+            return statements;
         }
 
         private String getDatabaseName(String jdbcUrl) {
