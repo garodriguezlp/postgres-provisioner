@@ -4,7 +4,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+DOCKER_DIR="$(cd "$SCRIPT_DIR/../docker" && pwd)"
+cd "$DOCKER_DIR"
 
 echo "=================================================="
 echo "  Stopping PostgreSQL Provisioner Test Environment"
@@ -17,4 +18,4 @@ docker-compose down
 echo ""
 echo "✓ Environment stopped successfully"
 echo ""
-echo "Note: Docker volumes are preserved. Use './reset.sh' to remove all data."
+echo "Note: Docker volumes are preserved. Use './scripts/reset.sh' to remove all data."

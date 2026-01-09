@@ -6,26 +6,31 @@ This directory contains the complete testing infrastructure for the PostgreSQL P
 
 ```
 testing/
-├── docker-compose.yml              # Main compose file for test environment
-├── postgres-ssh/                   # Custom PostgreSQL + SSH Docker image
-│   ├── Dockerfile
-│   └── docker-entrypoint.sh
-├── mock-artifactory/               # Mock Artifactory server
-│   └── Dockerfile                  # Nginx + builds migration ZIPs
+├── docker/                         # Docker infrastructure
+│   ├── docker-compose.yml          # Main compose file for test environment
+│   ├── postgres-ssh/               # Custom PostgreSQL + SSH Docker image
+│   │   ├── Dockerfile
+│   │   └── docker-entrypoint.sh
+│   └── mock-artifactory/           # Mock Artifactory server
+│       └── Dockerfile              # Nginx + builds migration ZIPs
+├── scripts/                        # Management and test scripts
+│   ├── up.sh                       # Start environment
+│   ├── down.sh                     # Stop environment
+│   ├── reset.sh                    # Reset (remove all data)
+│   ├── logs.sh                     # View logs
+│   ├── status.sh                   # Check environment status
+│   ├── test-ssh-configurator.sh   # Test SSH configurator
+│   └── test-flyway-provisioner.sh # Test Flyway provisioner
 ├── test-artifacts/                 # Migration sources
 │   ├── customer-migrations/        # Source SQL files
 │   ├── orders-migrations/
 │   └── inventory-migrations/
-├── up.sh                          # Start environment
-├── down.sh                        # Stop environment
-├── reset.sh                       # Reset (remove all data)
-├── logs.sh                        # View logs
-├── status.sh                      # Check environment status
-├── prepare-artifacts.sh           # Rebuild mock-artifactory with fresh artifacts
-└── README.md                      # This file
+├── baseline-scripts/               # Baseline SQL scripts
+│   ├── 01_create_schema_template.sql
+│   ├── 02_create_user_template.sql
+│   └── 03_grant_permissions_template.sql
+└── README.md                       # This file
 ```
-
-**Note**: Baseline SQL scripts are located in the project root at `../baseline-scripts/`, not in the testing directory.
 
 ## Prerequisites
 
@@ -38,7 +43,7 @@ testing/
 ### 1. Start the Environment
 
 ```bash
-./up.sh
+./scripts/up.sh
 ```
 
 This will:
@@ -51,37 +56,37 @@ This will:
 ### 2. Check Status
 
 ```bash
-./status.sh
+./scripts/status.sh
 ```
 
 ### 3. View Logs
 
 ```bash
 # Follow logs for all services
-./logs.sh
+./scripts/logs.sh
 
 # View logs without following
-./logs.sh --no-follow
+./scripts/logs.sh --no-follow
 
 # View logs for specific service
-./logs.sh postgres-ssh
+./scripts/logs.sh postgres-ssh
 ```
 
 ### 4. Stop the Environment
 
 ```bash
-./down.sh
+./scripts/down.sh
 ```
 
-Data is preserved in Docker volumes. Use `./reset.sh` to remove all data.
+Data is preserved in Docker volumes. Use `./scripts/reset.sh` to remove all data.
 
 ### 5. Reset (Clean Slate)
 
 ```bash
-./reset.sh
+./scripts/reset.sh
 ```
 
-This removes all containers, volumes, and data. You'll need to run `./up.sh` again.
+This removes all containers, volumes, and data. You'll need to run `./scripts/up.sh` again.
 
 ## Service Endpoints
 
@@ -144,7 +149,7 @@ jbang ../FlywayProvisioner.java \
   --db-url jdbc:postgresql://localhost:5432/testdb \
   --db-user postgres \
   --db-password testpass \
-  --baseline-location ../baseline-scripts \
+  --baseline-location ./baseline-scripts \
   --verbose
 ```
 
@@ -159,28 +164,24 @@ docker ps
 
 Check logs:
 ```bash
-./logs.sh
+./scripts/logs.sh
 ```
 
 ### PostgreSQL not accepting connections
 
 Wait a bit longer - it can take 10-15 seconds to initialize:
 ```bash
-./status.sh
+./scripts/status.sh
 ```
 
 ### Mock Artifactory returns 404
 mock-artifactory Docker image. Try rebuilding:
 ```bash
-./prepare-artifacts.sh
-```
-
-Or manually:
-```bash
-./down.sh
+cd docker
+./scripts/down.sh
 docker-compose build --no-cache mock-artifactory
 docker-compose build --no-cache
-./up.sh
+./scripts/up.sh
 ```
 
 ### Permission denied on scripts
@@ -194,7 +195,7 @@ chmod +x *.sh
 
 Stop the environment and check what's using the ports:
 ```bash
-./down.sh
+./scripts/down.sh
 
 # Check port 5432
 netstat -an | grep 5432
@@ -209,26 +210,25 @@ netstat -an | grep 8080
 
 ### Change Nginx Version
 
-Edit [docker-compose.yml](docker-compose.yml) and [mock-artifactory/Dockerfile](mock-artifactory/Dockerfile) to use a different Nginx version.
-## Customization
-mock-artifactory/Dockerfile` to copy and zip the new schema
-4. Rebuild the image with `./prepare-artifacts.sh
+Edit [docker/docker-compose.yml](docker/docker-compose.yml) and [docker/mock-artifactory/Dockerfile](docker/mock-artifactory/Dockerfile) to use a different Nginx version.
 
-Edit [docker-compose.yml](docker-compose.yml) and [postgres-ssh/Dockerfile](postgres-ssh/Dockerfile) to use a different PostgreSQL version.
+### Change PostgreSQL Version
+
+Edit [docker/docker-compose.yml](docker/docker-compose.yml) and [docker/postgres-ssh/Dockerfile](docker/postgres-ssh/Dockerfile) to use a different PostgreSQL version.
 
 ### Add More Test Schemas
 
 1. Create a new directory in `test-artifacts/` (e.g., `shipping-migrations/`)
 2. Add Flyway migration files (V1__*.sql, V2__*.sql, etc.)
-3. Update `postgres-ssh/Dockerfile` to copy and zip the new schema
-4. Rebuild the image with `docker-compose build`
+3. Update `docker/postgres-ssh/Dockerfile` to copy and zip the new schema
+4. Rebuild the image with `cd docker && docker-compose build`
 
 ## Clean Up
 
 To completely remove everything:
 
 ```bash
-./reset.sh
+./scripts/reset.sh
 ```
 
 This removes:

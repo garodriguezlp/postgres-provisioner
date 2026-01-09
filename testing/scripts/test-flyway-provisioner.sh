@@ -16,13 +16,13 @@ echo ""
 echo "→ Checking if services are running..."
 if ! docker ps | grep -q testing-postgres-ssh; then
     echo "❌ PostgreSQL container is not running!"
-    echo "   Run './testing/up.sh' first to start the infrastructure"
+    echo "   Run './testing/scripts/up.sh' first to start the infrastructure"
     exit 1
 fi
 
 if ! docker ps | grep -q mock-artifactory; then
     echo "❌ Mock Artifactory container is not running!"
-    echo "   Run './testing/up.sh' first to start the infrastructure"
+    echo "   Run './testing/scripts/up.sh' first to start the infrastructure"
     exit 1
 fi
 
@@ -81,5 +81,5 @@ fi
 echo "=================================================="
 echo ""
 echo "To reset the environment and test again:"
-echo "  cd testing && ./reset.sh && ./up.sh"
+echo "  cd testing && ./scripts/reset.sh && ./scripts/up.sh"
 echo ""

@@ -4,7 +4,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+DOCKER_DIR="$(cd "$SCRIPT_DIR/../docker" && pwd)"
+cd "$DOCKER_DIR"
 
 echo "=================================================="
 echo "  Starting PostgreSQL Provisioner Test Environment"

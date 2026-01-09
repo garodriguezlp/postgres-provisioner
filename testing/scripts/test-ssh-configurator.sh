@@ -4,6 +4,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "=================================================="
@@ -31,7 +32,7 @@ echo ""
 # Step 2: Run PostgresSshConfigurator
 echo "Step 2: Running PostgresSshConfigurator..."
 echo "------------------------------------------------------"
-cd "$SCRIPT_DIR/.."
+cd "$PROJECT_ROOT"
 jbang PostgresSshConfigurator.java \
     --host localhost \
     --port 2222 \

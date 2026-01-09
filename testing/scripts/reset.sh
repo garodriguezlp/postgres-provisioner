@@ -4,7 +4,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+DOCKER_DIR="$(cd "$SCRIPT_DIR/../docker" && pwd)"
+cd "$DOCKER_DIR"
 
 echo "=================================================="
 echo "  Resetting PostgreSQL Provisioner Test Environment"
@@ -39,4 +40,4 @@ docker rmi postgres-provisioner-test:latest 2>/dev/null || echo "Image already r
 echo ""
 echo "✓ Environment reset successfully"
 echo ""
-echo "Run './up.sh' to start fresh environment."
+echo "Run './scripts/up.sh' to start fresh environment."

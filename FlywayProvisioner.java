@@ -90,8 +90,8 @@ public class FlywayProvisioner implements Callable<Integer> {
 
     @Option(
         names = {"--baseline-location"},
-        defaultValue = "./baseline-scripts",
-        description = "Path to baseline SQL scripts (default: ./baseline-scripts)"
+        defaultValue = "./testing/baseline-scripts",
+        description = "Path to baseline SQL scripts (default: ./testing/baseline-scripts)"
     )
     private String baselineLocation;
 

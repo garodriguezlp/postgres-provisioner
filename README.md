@@ -92,10 +92,10 @@ A complete Docker-based test environment is included:
 
 ```bash
 cd testing
-./up.sh                           # Start test environment
-./test-ssh-configurator.sh        # Test SSH configurator
-./test-flyway-provisioner.sh      # Test Flyway provisioner
-./down.sh                          # Stop environment
+./scripts/up.sh                           # Start test environment
+./scripts/test-ssh-configurator.sh        # Test SSH configurator
+./scripts/test-flyway-provisioner.sh      # Test Flyway provisioner
+./scripts/down.sh                          # Stop environment
 ```
 
 ## ⚙️ Configuration
